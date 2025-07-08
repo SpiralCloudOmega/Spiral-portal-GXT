@@ -1,0 +1,181 @@
+# ΩΔ174 ScrollAI ClusterSpawn Workflow Example
+# This workflow demonstrates spawning and managing ScrollAI clusters
+# for distributed scroll chain processing
+
+name: "ScrollAI_ClusterSpawn_Demo"
+description: "Automated ScrollAI cluster spawning and scroll chain expansion"
+version: "1.0.0"
+adapter: "ScrollAIClusterSpawnAdapter"
+
+# Workflow configuration
+config:
+  api_endpoint: "http://scrollai-api:8080"
+  namespace: "scrollai-production"
+  cluster_prefix: "prod-scroll-cluster"
+  default_resources:
+    cpu: "4"
+    memory: "8Gi"
+    gpu: "1"
+
+# Workflow steps
+steps:
+  # Step 1: Initialize and list existing clusters
+  - name: "list_existing_clusters"
+    command: "list_clusters"
+    parameters:
+      status: "running"
+    description: "Check existing running clusters"
+
+  # Step 2: Spawn new ScrollAI cluster for high-throughput processing
+  - name: "spawn_primary_cluster"
+    command: "spawn_cluster"
+    parameters:
+      name: "scroll-primary-{{ workflow.run_id }}"
+      type: "high-performance"
+      replicas: 5
+      resources:
+        cpu: "8"
+        memory: "16Gi"
+        gpu: "2"
+      scroll_config:
+        max_chains: 2000
+        processing_mode: "parallel"
+        chain_timeout: "300s"
+        batch_size: 50
+    description: "Spawn primary processing cluster"
+
+  # Step 3: Spawn secondary cluster for overflow processing
+  - name: "spawn_secondary_cluster"
+    command: "spawn_cluster"
+    parameters:
+      name: "scroll-secondary-{{ workflow.run_id }}"
+      type: "standard"
+      replicas: 3
+      resources:
+        cpu: "4"
+        memory: "8Gi"
+        gpu: "1"
+      scroll_config:
+        max_chains: 1000
+        processing_mode: "sequential"
+        chain_timeout: "180s"
+        batch_size: 25
+    description: "Spawn secondary processing cluster"
+    depends_on: ["spawn_primary_cluster"]
+
+  # Step 4: Wait for clusters to be ready
+  - name: "verify_cluster_status"
+    command: "get_cluster_status"
+    parameters:
+      name: "scroll-primary-{{ workflow.run_id }}"
+    description: "Verify primary cluster is ready"
+    retry:
+      attempts: 10
+      delay: 30
+    depends_on: ["spawn_primary_cluster"]
+
+  # Step 5: Expand scroll chain across both clusters
+  - name: "expand_scroll_chain"
+    command: "expand_scroll_chain"
+    parameters:
+      chain_id: "production-chain-{{ workflow.timestamp }}"
+      target_clusters:
+        - "scroll-primary-{{ workflow.run_id }}"
+        - "scroll-secondary-{{ workflow.run_id }}"
+      expansion_factor: 4
+      distribution_strategy: "load_balanced"
+    description: "Distribute scroll chain processing across clusters"
+    depends_on: ["spawn_secondary_cluster", "verify_cluster_status"]
+
+  # Step 6: Monitor cluster performance
+  - name: "monitor_primary_performance"
+    command: "get_cluster_status"
+    parameters:
+      name: "scroll-primary-{{ workflow.run_id }}"
+    description: "Monitor primary cluster performance"
+    depends_on: ["expand_scroll_chain"]
+
+  # Step 7: Auto-scale based on performance metrics
+  - name: "auto_scale_if_needed"
+    command: "scale_cluster"
+    parameters:
+      name: "scroll-primary-{{ workflow.run_id }}"
+      replicas: "{{ steps.monitor_primary_performance.output.data.replicas.desired + 2 }}"
+    description: "Scale up primary cluster if throughput is high"
+    condition: "{{ steps.monitor_primary_performance.output.data.scroll_metrics.throughput > 80 }}"
+    depends_on: ["monitor_primary_performance"]
+
+  # Step 8: Get cluster logs for monitoring
+  - name: "fetch_cluster_logs"
+    command: "get_cluster_logs"
+    parameters:
+      name: "scroll-primary-{{ workflow.run_id }}"
+      lines: 200
+    description: "Fetch recent cluster logs for analysis"
+    depends_on: ["expand_scroll_chain"]
+
+# Workflow variables
+variables:
+  run_id: "{{ timestamp | format_date('%Y%m%d-%H%M%S') }}"
+  timestamp: "{{ now() }}"
+  
+# Event handlers
+on_success:
+  - name: "log_success"
+    action: "log"
+    message: "ScrollAI cluster workflow completed successfully"
+    details:
+      clusters_spawned: 2
+      chains_expanded: 1
+      total_replicas: "{{ steps.spawn_primary_cluster.output.data.replicas + steps.spawn_secondary_cluster.output.data.replicas }}"
+
+on_failure:
+  - name: "cleanup_on_failure"
+    action: "cleanup_clusters"
+    parameters:
+      cluster_prefix: "scroll-*-{{ workflow.run_id }}"
+  - name: "log_failure" 
+    action: "log"
+    level: "error"
+    message: "ScrollAI cluster workflow failed"
+
+# Cleanup after workflow completion
+cleanup:
+  - name: "optional_cluster_cleanup"
+    command: "delete_cluster"
+    parameters:
+      name: "scroll-secondary-{{ workflow.run_id }}"
+    description: "Cleanup secondary cluster if no longer needed"
+    condition: "{{ workflow.cleanup_enabled | default(false) }}"
+
+# Monitoring and alerts
+monitoring:
+  metrics:
+    - cluster_spawn_time
+    - scroll_chain_throughput
+    - resource_utilization
+    - error_rate
+  
+  alerts:
+    - condition: "cluster_spawn_time > 300"
+      message: "Cluster spawn time exceeded 5 minutes"
+      severity: "warning"
+    
+    - condition: "error_rate > 0.05"
+      message: "High error rate detected in scroll processing"
+      severity: "critical"
+
+# Resource quotas and limits
+resources:
+  max_clusters: 10
+  max_total_cpu: "80"
+  max_total_memory: "160Gi"
+  max_total_gpu: "20"
+
+# Tags for organization
+tags:
+  - "scrollai"
+  - "cluster-management"
+  - "ΩΔ174"
+  - "distributed-processing"
+  - "auto-scaling"
