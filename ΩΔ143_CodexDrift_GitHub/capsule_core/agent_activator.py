@@ -442,11 +442,24 @@ class AgentActivator:
             # Remove least active agent to make room
             await self._cleanup_inactive_agents(1)
         
-        profile = self.agent_profiles[profile_id].copy()
+        profile = self.agent_profiles[profile_id]
         agent_id = f"agent_{uuid.uuid4().hex[:8]}"
-        profile.agent_id = agent_id
         
-        agent = Agent(profile)
+        # Create a new profile with the same data but updated agent_id
+        agent_profile = AgentProfile(
+            agent_id=agent_id,
+            agent_type=profile.agent_type,
+            capabilities=profile.capabilities,
+            position=profile.position,
+            activation_threshold=profile.activation_threshold,
+            learning_rate=profile.learning_rate,
+            memory_capacity=profile.memory_capacity,
+            communication_range=profile.communication_range,
+            priority_level=profile.priority_level,
+            creation_time=profile.creation_time
+        )
+        
+        agent = Agent(agent_profile)
         success = await agent.activate()
         
         if success:

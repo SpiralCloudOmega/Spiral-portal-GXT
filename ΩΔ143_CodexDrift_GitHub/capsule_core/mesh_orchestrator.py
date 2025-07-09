@@ -73,7 +73,7 @@ class MeshOrchestrator:
         self.config = config or {}
         self.nodes: Dict[str, MeshNode] = {}
         self.tasks: Dict[str, MeshTask] = {}
-        self.scrollmath_engine = ScrollMathEngine(config.get("engine", {}))
+        self.scrollmath_engine = ScrollMathEngine(config.get("engine", {}) if config else {})
         self.mesh_id = str(uuid.uuid4())
         self.orchestration_active = False
         
