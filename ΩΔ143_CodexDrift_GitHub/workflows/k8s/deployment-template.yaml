@@ -1,0 +1,286 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${NAMESPACE}
+  labels:
+    name: omega-delta-143
+    component: codex-drift-capsule
+    environment: ${ENVIRONMENT}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codex-drift-capsule
+  namespace: ${NAMESPACE}
+  labels:
+    app: codex-drift-capsule
+    component: main
+    version: v1.0.0
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: codex-drift-capsule
+  template:
+    metadata:
+      labels:
+        app: codex-drift-capsule
+        component: main
+        version: v1.0.0
+    spec:
+      containers:
+      - name: capsule-runtime
+        image: ghcr.io/spiralcloudomeag/codex-drift-5d:${IMAGE_TAG}
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: mesh
+          containerPort: 8081
+          protocol: TCP
+        - name: agents
+          containerPort: 8082
+          protocol: TCP
+        - name: memory
+          containerPort: 8083
+          protocol: TCP
+        env:
+        - name: CAPSULE_MODE
+          value: "cluster"
+        - name: ENVIRONMENT
+          value: "${ENVIRONMENT}"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: MESH_ORCHESTRATOR_MAX_NODES
+          value: "100"
+        - name: AGENT_ACTIVATOR_MAX_AGENTS
+          value: "50"
+        - name: MEMORY_MANAGER_MAX_DEPTH
+          value: "10"
+        resources:
+          requests:
+            cpu: 2
+            memory: 4Gi
+            ephemeral-storage: 10Gi
+          limits:
+            cpu: 4
+            memory: 8Gi
+            ephemeral-storage: 20Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+          readOnly: true
+        - name: data-volume
+          mountPath: /app/data
+        - name: logs-volume
+          mountPath: /app/logs
+      volumes:
+      - name: config-volume
+        configMap:
+          name: capsule-config
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: capsule-data-pvc
+      - name: logs-volume
+        emptyDir: {}
+      nodeSelector:
+        kubernetes.io/arch: amd64
+      tolerations:
+      - key: "compute-intensive"
+        operator: "Equal"
+        value: "true"
+        effect: "NoSchedule"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: codex-drift-capsule-service
+  namespace: ${NAMESPACE}
+  labels:
+    app: codex-drift-capsule
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+    protocol: TCP
+  - name: mesh
+    port: 8081
+    targetPort: mesh
+    protocol: TCP
+  - name: agents
+    port: 8082
+    targetPort: agents
+    protocol: TCP
+  - name: memory
+    port: 8083
+    targetPort: memory
+    protocol: TCP
+  selector:
+    app: codex-drift-capsule
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: capsule-config
+  namespace: ${NAMESPACE}
+data:
+  capsule_config.json: |
+    {
+      "log_level": "INFO",
+      "scrollmath_engine": {
+        "field_resolution": 2048,
+        "drift_sensitivity": 0.005
+      },
+      "mesh_orchestrator": {
+        "max_nodes": 100,
+        "heartbeat_interval": 10,
+        "task_timeout": 300
+      },
+      "symbolic_computer": {
+        "cache_size": 10000
+      },
+      "memory_manager": {
+        "max_recursion_depth": 15,
+        "fragment_lifetime_days": 60,
+        "coherence_threshold": 0.6
+      },
+      "agent_activator": {
+        "max_agents": 75,
+        "message_broker_size": 2000
+      },
+      "notion_sync": {
+        "enabled": true,
+        "sync_interval": 300
+      }
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: capsule-data-pvc
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: fast-ssd
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: codex-drift-capsule-ingress
+  namespace: ${NAMESPACE}
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+spec:
+  tls:
+  - hosts:
+    - codex-drift.${ENVIRONMENT}.spiral-cloud-omega.com
+    secretName: codex-drift-tls
+  rules:
+  - host: codex-drift.${ENVIRONMENT}.spiral-cloud-omega.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: codex-drift-capsule-service
+            port:
+              number: 8080
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codex-drift-capsule-sa
+  namespace: ${NAMESPACE}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: ${NAMESPACE}
+  name: codex-drift-capsule-role
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codex-drift-capsule-rolebinding
+  namespace: ${NAMESPACE}
+subjects:
+- kind: ServiceAccount
+  name: codex-drift-capsule-sa
+  namespace: ${NAMESPACE}
+roleRef:
+  kind: Role
+  name: codex-drift-capsule-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: codex-drift-capsule-hpa
+  namespace: ${NAMESPACE}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: codex-drift-capsule
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60

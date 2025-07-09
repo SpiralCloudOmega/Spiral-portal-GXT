@@ -1,0 +1,424 @@
+name: ΩΔ143 Codex Drift 5D Capsule CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'ΩΔ143_CodexDrift_GitHub/**'
+      - '.github/workflows/codex-drift-capsule.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'ΩΔ143_CodexDrift_GitHub/**'
+  workflow_dispatch:
+    inputs:
+      deploy_environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      run_performance_tests:
+        description: 'Run performance tests'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.9'
+  CAPSULE_VERSION: '1.0.0'
+  DOCKER_IMAGE: 'spiral-cloud-omega/codex-drift-5d'
+
+jobs:
+  # Code Quality and Security
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black isort bandit safety
+          cd ΩΔ143_CodexDrift_GitHub
+          pip install -r requirements.txt || echo "No requirements.txt found"
+          
+      - name: Code formatting check
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          black --check --diff .
+          isort --check-only --diff .
+          
+      - name: Lint code
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+          
+      - name: Security scan
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          bandit -r . -f json -o bandit-report.json || true
+          safety check --json --output safety-report.json || true
+          
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: security-reports
+          path: |
+            ΩΔ143_CodexDrift_GitHub/bandit-report.json
+            ΩΔ143_CodexDrift_GitHub/safety-report.json
+
+  # Unit Tests
+  unit-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+        
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pytest-cov numpy sympy
+          cd ΩΔ143_CodexDrift_GitHub
+          pip install -r requirements.txt || echo "No requirements.txt found"
+          
+      - name: Run unit tests
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          python -m pytest tests/ -v --cov=capsule_core --cov=notion_sync --cov=runtime_launcher \
+            --cov-report=xml --cov-report=html --cov-report=term-missing
+            
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./ΩΔ143_CodexDrift_GitHub/coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  # Integration Tests
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio numpy sympy redis
+          cd ΩΔ143_CodexDrift_GitHub
+          pip install -r requirements.txt || echo "No requirements.txt found"
+          
+      - name: Run integration tests
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          python -m pytest tests/integration/ -v --tb=short
+        env:
+          REDIS_URL: redis://localhost:6379
+
+  # Performance Tests
+  performance-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: ${{ github.event.inputs.run_performance_tests == 'true' || github.ref == 'refs/heads/main' }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pytest-benchmark numpy sympy
+          cd ΩΔ143_CodexDrift_GitHub
+          pip install -r requirements.txt || echo "No requirements.txt found"
+          
+      - name: Run performance tests
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          python -m pytest tests/performance/ -v --benchmark-only --benchmark-json=benchmark-results.json
+          
+      - name: Upload performance results
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: ΩΔ143_CodexDrift_GitHub/benchmark-results.json
+
+  # Build Container Image
+  build-container:
+    runs-on: ubuntu-latest
+    needs: [code-quality, unit-tests]
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+      image-tag: ${{ steps.meta.outputs.tags }}
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/codex-drift-5d
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=v${{ env.CAPSULE_VERSION }},enable={{is_default_branch}}
+            
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./ΩΔ143_CodexDrift_GitHub
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # Security Scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-container
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/codex-drift-5d:sha-${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # Deploy to Staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [build-container, integration-tests]
+    if: github.ref == 'refs/heads/develop' || github.event.inputs.deploy_environment == 'staging'
+    environment: staging
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > ~/.kube/config
+          
+      - name: Deploy to staging
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub/workflows/k8s
+          envsubst < deployment-template.yaml > deployment.yaml
+          kubectl apply -f deployment.yaml
+          kubectl rollout status deployment/codex-drift-capsule -n omega-delta-143-staging
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+          ENVIRONMENT: staging
+          NAMESPACE: omega-delta-143-staging
+          
+      - name: Run smoke tests
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          python -m pytest tests/smoke/ -v --environment=staging
+        env:
+          STAGING_ENDPOINT: ${{ secrets.STAGING_ENDPOINT }}
+
+  # Deploy to Production
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [build-container, deploy-staging, security-scan]
+    if: github.ref == 'refs/heads/main' || github.event.inputs.deploy_environment == 'production'
+    environment: production
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Configure kubectl
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > ~/.kube/config
+          
+      - name: Deploy to production
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub/workflows/k8s
+          envsubst < deployment-template.yaml > deployment.yaml
+          kubectl apply -f deployment.yaml
+          kubectl rollout status deployment/codex-drift-capsule -n omega-delta-143
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+          ENVIRONMENT: production
+          NAMESPACE: omega-delta-143
+          
+      - name: Run production smoke tests
+        run: |
+          cd ΩΔ143_CodexDrift_GitHub
+          python -m pytest tests/smoke/ -v --environment=production
+        env:
+          PRODUCTION_ENDPOINT: ${{ secrets.PRODUCTION_ENDPOINT }}
+          
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v1
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v${{ env.CAPSULE_VERSION }}
+          name: ΩΔ143 Codex Drift 5D Capsule v${{ env.CAPSULE_VERSION }}
+          body: |
+            ## ΩΔ143 Codex Drift 5D Capsule Release
+            
+            This release contains the complete ΩΔ143 Codex Drift 5D Capsule system with:
+            - Advanced scrollmath mesh orchestration
+            - Symbolic field computation
+            - Memory recursion management
+            - Agent activation system
+            - Notion sync integration
+            - GitHub Actions CI/CD pipeline
+            
+            ### Components
+            - ScrollMath Engine v1.0.0
+            - Mesh Orchestrator v1.0.0
+            - Symbolic Field Computer v1.0.0
+            - Memory Recursion Manager v1.0.0
+            - Agent Activator v1.0.0
+            - Notion Sync Agent v1.0.0
+            - Runtime Launcher v1.0.0
+            
+            ### Docker Image
+            ```
+            ghcr.io/${{ github.repository_owner }}/codex-drift-5d:v${{ env.CAPSULE_VERSION }}
+            ```
+            
+            ### Deployment
+            See the deployment documentation in the `workflows/` directory.
+          files: |
+            ΩΔ143_CodexDrift_GitHub/capsule_manifest.json
+            ΩΔ143_CodexDrift_GitHub/docs/README.md
+          draft: false
+          prerelease: false
+
+  # Monitoring and Alerting
+  post-deployment:
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    if: always()
+    
+    steps:
+      - name: Notify deployment status
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          text: |
+            ΩΔ143 Codex Drift 5D Capsule deployment completed
+            Status: ${{ job.status }}
+            Environment: ${{ github.event.inputs.deploy_environment || 'auto' }}
+            Commit: ${{ github.sha }}
+            Image: ghcr.io/${{ github.repository_owner }}/codex-drift-5d:sha-${{ github.sha }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        if: always()
+        
+      - name: Update deployment dashboard
+        run: |
+          curl -X POST "${{ secrets.DASHBOARD_WEBHOOK }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "service": "codex-drift-5d-capsule",
+              "version": "v${{ env.CAPSULE_VERSION }}",
+              "status": "${{ job.status }}",
+              "environment": "${{ github.event.inputs.deploy_environment || github.ref_name }}",
+              "commit": "${{ github.sha }}",
+              "timestamp": "${{ github.event.created_at }}"
+            }'
+        if: always() && secrets.DASHBOARD_WEBHOOK != ''
+
+  # Cleanup
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [deploy-production, post-deployment]
+    if: always()
+    
+    steps:
+      - name: Clean up old container images
+        run: |
+          # Clean up old development images (keep last 10)
+          echo "Cleaning up old container images..."
+          # This would typically use a container registry API
+          # For now, just log the action
+          echo "Would clean up images older than 30 days"
+          
+      - name: Archive test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: test-results-${{ github.sha }}
+          path: |
+            ΩΔ143_CodexDrift_GitHub/coverage.xml
+            ΩΔ143_CodexDrift_GitHub/benchmark-results.json
+            ΩΔ143_CodexDrift_GitHub/bandit-report.json
+            ΩΔ143_CodexDrift_GitHub/safety-report.json
+          retention-days: 30
