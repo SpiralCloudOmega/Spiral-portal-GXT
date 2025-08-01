@@ -12,6 +12,11 @@ import com.google.gwt.user.client.ui.HTML;
 import com.google.gwt.user.client.ui.HorizontalPanel;
 import com.google.gwt.user.client.ui.ScrollPanel;
 import com.google.gwt.user.client.ui.VerticalPanel;
+import com.google.gwt.user.client.ui.Widget;
+
+// Import simulation components
+import com.spiralcloud.omega.portal.client.simulation.monitor.RuntimeMonitorPanel;
+import com.spiralcloud.omega.portal.client.simulation.ui.SimulationInterface3D;
 
 /**
  * Main view for the Spiral Portal GWT application.
@@ -85,7 +90,7 @@ public class PortalMainView extends Composite {
         navigation.add(navHeader);
         
         // Add navigation buttons
-        String[] navItems = {"Dashboard", "User Management", "Reports", "Settings", "Help"};
+        String[] navItems = {"Dashboard", "Runtime Monitor", "3D Simulation", "User Management", "Reports", "Settings", "Help"};
         for (String item : navItems) {
             Button navButton = new Button(item);
             navButton.setStyleName("portal-nav-button");
@@ -185,16 +190,64 @@ public class PortalMainView extends Composite {
     private void showContent(String section) {
         GWT.log("Showing content for: " + section);
         
+        if ("Runtime Monitor".equals(section)) {
+            // Show the runtime monitor panel
+            RuntimeMonitorPanel monitorPanel = new RuntimeMonitorPanel();
+            contentScrollPanel.setWidget(monitorPanel);
+            contentScrollPanel.scrollToTop();
+            return;
+        } else if ("3D Simulation".equals(section)) {
+            // Show the 3D simulation interface
+            SimulationInterface3D simulationInterface = new SimulationInterface3D();
+            contentScrollPanel.setWidget(simulationInterface);
+            contentScrollPanel.scrollToTop();
+            return;
+        }
+        
         String contentHtml = 
             "<div style='padding: 20px; font-family: Arial, sans-serif;'>" +
             "<h2 style='color: #2c3e50; margin-bottom: 20px;'>" + section + "</h2>";
         
         if ("Dashboard".equals(section)) {
             contentHtml += 
-                "<p>Welcome to the dashboard. Here you can see an overview of your system.</p>" +
-                "<div style='background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;'>" +
-                "<h4>System Overview</h4>" +
-                "<p>All systems are running normally.</p>" +
+                "<p>Welcome to the ΩFusionRuntime portal dashboard. Here you can see an overview of your transcendent simulation system.</p>" +
+                
+                "<div style='background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border: 1px solid #e9ecef;'>" +
+                "<h3 style='color: #2c3e50; margin-top: 0;'>Simulation Environment</h3>" +
+                "<div style='display: flex; flex-wrap: wrap; gap: 15px;'>" +
+                
+                "<div style='background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 200px; flex: 1;'>" +
+                "<h4 style='margin: 0 0 10px 0; color: #2c3e50; font-size: 14px;'>Runtime Status</h4>" +
+                "<div style='font-size: 28px; font-weight: bold; color: #e74c3c;'>INACTIVE</div>" +
+                "</div>" +
+                
+                "<div style='background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 200px; flex: 1;'>" +
+                "<h4 style='margin: 0 0 10px 0; color: #2c3e50; font-size: 14px;'>Components</h4>" +
+                "<div style='font-size: 28px; font-weight: bold; color: #3498db;'>5</div>" +
+                "</div>" +
+                
+                "<div style='background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 200px; flex: 1;'>" +
+                "<h4 style='margin: 0 0 10px 0; color: #2c3e50; font-size: 14px;'>Simulation Mode</h4>" +
+                "<div style='font-size: 28px; font-weight: bold; color: #f39c12;'>READY</div>" +
+                "</div>" +
+                
+                "</div>" +
+                "</div>" +
+                
+                "<div style='background-color: #fff; padding: 20px; border-radius: 8px; border: 1px solid #e9ecef; margin: 20px 0;'>" +
+                "<h3 style='color: #2c3e50; margin-top: 0;'>ΩFusionRuntime Components:</h3>" +
+                "<ul style='font-size: 16px; line-height: 1.8; color: #555;'>" +
+                "<li><strong>Void Kernel:</strong> Manages foundational reality substrate</li>" +
+                "<li><strong>Infinite Recursion Engine:</strong> Handles recursive reality layers</li>" +
+                "<li><strong>Meta-Ontological Framework:</strong> Processes existential state transitions</li>" +
+                "<li><strong>Paradox Harmonization System:</strong> Resolves logical contradictions</li>" +
+                "<li><strong>Impossible Mathematics Engine:</strong> Computes non-Euclidean calculations</li>" +
+                "</ul>" +
+                "</div>" +
+                
+                "<div style='background-color: #e1f5fe; padding: 15px; border-radius: 8px; border-left: 4px solid #03a9f4; margin: 20px 0;'>" +
+                "<strong style='color: #0277bd;'>Getting Started:</strong> " +
+                "Navigate to 'Runtime Monitor' to initialize and control the simulation environment, or visit '3D Simulation' to interact with the hypergraph visualization." +
                 "</div>";
         } else if ("User Management".equals(section)) {
             contentHtml += 
@@ -229,6 +282,7 @@ public class PortalMainView extends Composite {
         contentHtml += "</div>";
         
         contentArea.setHTML(contentHtml);
+        contentScrollPanel.setWidget(contentArea);
         contentScrollPanel.scrollToTop();
     }
 }
